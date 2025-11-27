@@ -1,0 +1,86 @@
+version: '3.8'
+
+# docker-compose.prod.yml - Para producción con imagen de Docker Hub
+# Uso: docker-compose -f docker-compose.prod.yml up -d
+#
+# IMPORTANTE: Antes de usar este archivo:
+# 1. Reemplaza 'tu-usuario-dockerhub' con tu usuario real de Docker Hub
+# 2. O configura la variable de entorno DOCKER_USER
+# 3. Asegúrate de que la imagen esté en Docker Hub: docker push tu-usuario/rsu-reciclaje:latest
+
+services:
+  # Contenedor 1: MySQL - Base de datos
+  mysql:
+    image: mysql:8.0
+    container_name: rsu_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-rsu_reciclaje}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_USER: ${DB_USERNAME:-rsu_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-rootpassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - rsu_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Contenedor 2: PHP-FPM - Aplicación Laravel (desde Docker Hub)
+  # NOTA: Usa tu usuario real de Docker Hub (pupuchon4775)
+  app:
+    image: ${DOCKER_USER:-pupuchon4775}/rsuReciclaje:${IMAGE_TAG:-latest}
+    container_name: rsu_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+      # Opcional: montar storage para persistencia
+      - app_storage:/var/www/html/storage
+      - app_cache:/var/www/html/bootstrap/cache
+    networks:
+      - rsu_network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-rsu_reciclaje}
+      - DB_USERNAME=${DB_USERNAME:-rsu_user}
+      - DB_PASSWORD=${DB_PASSWORD:-rootpassword}
+      - DB_CONNECTION=mysql
+    command: php-fpm
+
+  # Contenedor 3: Nginx - Servidor web
+  nginx:
+    image: nginx:alpine
+    container_name: rsu_nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      # Nota: En producción, el código está dentro de la imagen, no se monta el código fuente
+    networks:
+      - rsu_network
+    depends_on:
+      - app
+
+volumes:
+  mysql_data:
+    driver: local
+  app_storage:
+    driver: local
+  app_cache:
+    driver: local
+
+networks:
+  rsu_network:
+    driver: bridge
+
+
